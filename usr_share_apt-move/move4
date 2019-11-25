@@ -19,6 +19,28 @@ function ucfirst(s) {
 	return toupper(substr(s, 1, 1)) substr(s, 2)
 }
 
+function readsha256(sha256f, sha256) {
+	err = getline sha256 < sha256f
+	if (err < 0) {
+		print "getline failed on " sha256f > "/dev/stderr"
+		exit 1
+	} else if (err == 0) {
+		return -1
+	}
+	return sha256
+}
+
+function readsha1(sha1f, sha1) {
+	err = getline sha1 < sha1f
+	if (err < 0) {
+		print "getline failed on " sha1f > "/dev/stderr"
+		exit 1
+	} else if (err == 0) {
+		return -1
+	}
+	return sha1
+}
+
 function readsize(sizef, size) {
 	err = getline size < sizef
 	if (err < 0) {
@@ -34,8 +56,10 @@ BEGIN {
 	pref = ARGV[1]
 	sizef = ARGV[2]
 	skipf = ARGV[3]
-	pkgf = ARGV[4]
-	contents = ARGV[5] == "yes"
+	sha256f = ARGV[4]
+	sha1f = ARGV[5]
+	pkgf = ARGV[6]
+	contents = ARGV[7] == "yes"
 	ARGC = 1
 
 	isbin = pref ~ /deb$/
@@ -72,7 +96,8 @@ BEGIN {
 		pri[++i] = "Filename"
 		pri[++i] = "Size"
 		pri[++i] = "MD5sum"
-		pri[++i] = "SHA1sum"
+		pri[++i] = "SHA1"
+		pri[++i] = "SHA256"
 		pri[++i] = "Description"
 	} else {
 		pri[++i] = "Package"
@@ -90,10 +115,14 @@ BEGIN {
 		pri[++i] = "Format"
 		pri[++i] = "Directory"
 		pri[++i] = "Files"
+		pri[++i] = "Checksums-sha1"
+		pri[++i] = "Checksums-sha256"
 	}
 	prilen = i
 
 	nextsize = readsize(sizef)
+	nextsha256 = readsha256(sha256f)
+	nextsha1 = readsha1(sha1f)
 	printf "" > skipf
 	if (isbin) {
 		printf "" > pkgf
@@ -109,6 +138,17 @@ nextsize < 0 {
 	size = nextsize
 	nextsize = readsize(sizef)
 }
+
+{
+	sha256 = nextsha256
+	nextsha256 = readsha256(sha256f)
+}
+
+{
+	sha1 = nextsha1
+	nextsha1 = readsha1(sha1f)
+}
+
 
 isbin {
 	suffix = substr($2, length($2) - 3)
@@ -147,6 +187,8 @@ isbin {
 
 	tv["md5sum"] = " " $1
 	tv["size"] = " " size
+	tv["sha256"] = " " sha256
+	tv["sha1"] = " " sha1
 	if ("revision" in tv) {
 		tv["version"] = tv["version"] "-" tv["revision"]
 		delete tv["revision"]
@@ -216,6 +258,8 @@ isbin {
 		files = files " " a[i]
 	}
 	tv["files"] = "\n " $1 " " size " " file tv["files"]
+	tv["checksums-sha256"] = "\n " sha256 " " size " " file tv["checksums-sha256"] 
+	tv["checksums-sha1"] = "\n " sha1 " " size " " file tv["checksums-sha1"]
 	tv["section"] = tv["section"]
 	tv["priority"] = tv["priority"]
 	tv["directory"] = tv["directory"]

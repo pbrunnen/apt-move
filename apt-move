@@ -4,6 +4,14 @@
 #  Copyright (c) 1999-2000 Gregory T. Norris <adric@debian.org>
 #  Copyright (c) 2000-2003 Herbert Xu <herbert@debian.org>
 #
+# ----------------------
+#  Modified by Peter Brunnengraeber : 2019-11-25
+#    Merged SHA256 sum fixes from Mario Koppensteiner and the fifo sync/mawk fix from Михаил
+#		https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=639770
+#		https://www.mail-archive.com/debian-bugs-dist@lists.debian.org/msg1149403.html
+#
+# ----------------------
+#
 #  License:  This script is distributed under the terms of version 2
 #            of the GNU GPL. See the LICENSE file included with the package.
 #
@@ -72,7 +80,7 @@ VERSION=0
 FETCH=/usr/lib/apt-move/fetch	# crappy replacement for apt-get
 SCRIPTS=$APTMOVE_SCRIPTS
 : ${SCRIPTS:=/usr/share/apt-move}
-awk="awk -f $SCRIPTS/cmpbignum.awk -f $SCRIPTS/cmpversion.awk -f"
+awk="mawk -f $SCRIPTS/cmpbignum.awk -f $SCRIPTS/cmpversion.awk -f"
 awk="$awk $SCRIPTS/getdist.awk -f"
 MOVE3=$SCRIPTS/move3
 MOVE4="$awk $SCRIPTS/move4"
@@ -137,6 +145,20 @@ showusage() {
 
 	EOF
 	exit 64
+}
+
+apt_move_sha1() {
+    while read line
+    do
+	sha1sum ${line} | cut -d" " -f 1
+    done
+}
+
+apt_move_sha256() {
+    while read line
+    do
+      sha256sum ${line} | cut -d" " -f 1
+    done
 }
 
 apt_move_stat() {
@@ -209,6 +231,7 @@ waitall() {
 		wait $i
 		status=$?
 		set -e
+echo "child $i - $status"
 		case $status in
 		0 | 141)
 			;;
@@ -217,11 +240,13 @@ waitall() {
 			;;
 		esac
 	done
+echo 6
 	unset CHILDREN
+echo 7
 }
 
 sortind() {
-	awk '
+	mawk '
 		{
 			file = $1
 			n = split(file, a, /[_\/]/)
@@ -290,7 +315,7 @@ make_idx_local() {
 	for i; do
 		dist=${i%%.*}
 		[ -d $dir/$dist ] || mkdir $dir/$dist
-		awk -f $SCRIPTS/getdist.awk -f $pf-awk $i > $pf-tmp1
+		mawk -f $SCRIPTS/getdist.awk -f $pf-awk $i > $pf-tmp1
 		< $pf-tmp1 sort -k 1,1 > $dir/$dist/local
 	done
 }
@@ -325,7 +350,7 @@ make_pkg_list() {
 		fi
 		[ $# -eq 1 ] && [ ! -e "$1" ] && continue
 		printf '%s\n' "$@"
-	done | xargs -r awk '
+	done | xargs -r mawk '
 		function process() {
 			if (name == "")
 				return
@@ -364,13 +389,13 @@ make_pkg_list() {
 	cd $OLDPWD
 	< $pf-tmp2 sort -k 3,3 |
 		join -a 1 -o 1.1,1.2,1.4,2.2,1.3 - $TMPHOME/code-alias |
-		awk '{print $1 " " $2 " " $4 " " $3}' | sort -k 1,1 |
+		mawk '{print $1 " " $2 " " $4 " " $3}' | sort -k 1,1 |
 		join -a 1 -e - -o 2.2,2.3,2.4,1.2 $pf-tmp1 - |
-		awk '
+		mawk '
 			$1 == "-" { $1 = "'$ARCH'" }
 			$2 == "-" { $2 = "'$DIST'" }
 			{ print }
-		' | sort -k 1,2 | awk '
+		' | sort -k 1,2 | mawk '
 			{ key = $2 "." $1 }
 			file != key {
 				if (file && close(file)) {
@@ -469,7 +494,7 @@ getonebin() {
 
 	sort -k 1,1 -m $pf-old "$@" | $GET2 |
 		sort -k 1,1 -sum $dir/local - |
-		awk '{
+		mawk '{
 			printf "%-30s\t%-9s\t%-15s\t%-9s\t%s\n",
 				$1, $2, $3, $4, $5
 		}' | unexpand -a > $dist.binary
@@ -486,7 +511,7 @@ getonesrc() {
 
 	< $dir/debian $GET2 |
 		sort -k 1,1 -sum $dir/local - |
-		awk '{
+		mawk '{
 			printf "%-30s\t%-9s\t%-15s\t%s\n",
 				$1, $2, $3, $4
 		}' | unexpand -a > $dist.source
@@ -499,7 +524,7 @@ make_index() {
 	for i in binary source; do
 		set *.$i
 		if [ $# -gt 1 ] || [ -e "$1" ]; then
-			printf '%s\n' "$@" | awk '
+			printf '%s\n' "$@" | mawk '
 				{
 					f = $0
 					d = substr(f, 1, length(f) - 7)
@@ -537,8 +562,8 @@ make_index() {
 proc_idx_diff() {
 	local pf i readlink binkey
 	pf=$TMPHOME/proc_idx_diff
-	rm -f $pf-fifo1 $pf-fifo2
-	mkfifo $pf-fifo1 $pf-fifo2
+	rm -f $pf-fifo1 $pf-fifo2 $pf-fifo3 $pf-fifo4
+	mkfifo $pf-fifo1 $pf-fifo2 $pf-fifo3 $pf-fifo4
 
 	[ -f arch ] || > arch
 	[ -f binary ] || > binary
@@ -591,7 +616,7 @@ proc_idx_diff() {
 		return
 	fi
 
-	< $pf-new cut -d ' ' -f 1 | awk '
+	< $pf-new cut -d ' ' -f 1 | mawk '
 		{ rel[$0] = 1 }
 		END {
 			file = "binary"
@@ -756,8 +781,8 @@ movefiles() {
 
 	local pf i bif
 	pf=$TMPHOME/movefiles
-	rm -f $pf-fifo1 $pf-fifo2
-	mkfifo $pf-fifo1 $pf-fifo2
+	rm -f $pf-fifo1 $pf-fifo2 $pf-fifo3 $pf-fifo4
+	mkfifo $pf-fifo1 $pf-fifo2 $pf-fifo3 $pf-fifo4
 	rm -rf $pf
 	mkdir $pf
 
@@ -789,15 +814,19 @@ movefiles() {
 
 	if [ $GET_BINARY ]; then
 		< $pf-deb apt_move_stat > $pf-fifo1&
+	        < $pf-deb apt_move_sha256 > $pf-fifo3&
+	        < $pf-deb apt_move_sha1 > $pf-fifo4&
 		< $pf-deb xargs -r md5sum |
-			$MOVE4 $pf/deb $pf-fifo1 $pf-skip1 $pf-pkg $CONTENTS
+			$MOVE4 $pf/deb $pf-fifo1 $pf-skip1 $pf-fifo3 $pf-fifo4 $pf-pkg $CONTENTS
 		waitall
 	fi > $pf-mvdeb
 
 	if [ $GET_SOURCE ]; then
 		< $pf-dsc apt_move_stat > $pf-fifo1&
+		< $pf-dsc apt_move_sha256 > $pf-fifo3&
+		< $pf-dsc apt_move_sha1 > $pf-fifo4&
 		< $pf-dsc xargs -r md5sum |
-			$MOVE4 $pf/dsc $pf-fifo1 $pf-skip2 > $pf-dsc1
+			$MOVE4 $pf/dsc $pf-fifo1 $pf-skip2 $pf-fifo3 $pf-fifo4 > $pf-dsc1
 		waitall
 
 		sort -t _ -k 2 .apt-move/source > $pf-sdist
@@ -858,18 +887,22 @@ upgrade0() {
 	\)
 
 	< $pf-deb apt_move_stat > $pf-fifo1&
+	< $pf-deb apt_move_sha256 > $pf-fifo3&
+	< $pf-deb apt_move_sha1 > $pf-fifo4&
 	< $pf-deb xargs -r md5sum |
-		$MOVE4 $pf/deb $pf-fifo1 $pf-skip1 $pf-pkg $CONTENTS \
+		$MOVE4 $pf/deb $pf-fifo1 $pf-skip1 $pf-fifo3 $pf-fifo4 $pf-pkg $CONTENTS \
 		> $pf-mvdeb
 	waitall
 
 	< $pf-dsc apt_move_stat > $pf-fifo1&
+	< $pf-dsc apt_move_sha256 > $pf-fifo3&
+	< $pf-dsc apt_move_sha1 > $pf-fifo4&
 	< $pf-dsc xargs -r md5sum |
-		$MOVE4 $pf/dsc $pf-fifo1 $pf-skip2 > $pf-dsc1
+		$MOVE4 $pf/dsc $pf-fifo1 $pf-skip2 $pf-fifo3 $pf-fifo4 > $pf-dsc1
 	waitall
 
 	cd .apt-move
-	< $pf-pkg sortind | awk '
+	< $pf-pkg sortind | mawk '
 		{
 			name = $1
 			ver = $2
@@ -887,7 +920,7 @@ upgrade0() {
 		}
 	'
 
-	< $pf-dsc1 awk '
+	< $pf-dsc1 mawk '
 		{
 			src = $1
 			ver = $2
@@ -935,8 +968,8 @@ upgrade0() {
 dofsck() {
 	local pf fifos i readlink bif overawk
 	pf=$TMPHOME/dofsck
-	rm -f $pf-fifo1 $pf-fifo2
-	mkfifo $pf-fifo1 $pf-fifo2
+	rm -f $pf-fifo1 $pf-fifo2 $pf-fifo3 $pf-fifo4
+	mkfifo $pf-fifo1 $pf-fifo2 $pf-fifo3 $pf-fifo4
 	rm -rf $pf
 	mkdir $pf
 
@@ -1074,7 +1107,7 @@ listbin() {
 	fi
 
 	join -o 2.1,2.3,2.5 .apt-move/$DIST.arch.$ARCH - |
-		join -a 1 - $pf-old | awk "$changed"' { print $1 " " $2 }' |
+		join -a 1 - $pf-old | mawk "$changed"' { print $1 " " $2 }' |
 		tee $pf-tmp1 | sed 's/^[^ ]*_\([^ ]*\) .*/\1_*/' > $pf-tmp2
 	sed 's/.* \(.*\)$/\1 binary-'$ARCH'/' $pf-tmp1 | pkgdir |
 		paste -d / - $pf-tmp2
@@ -1105,7 +1138,7 @@ listsrc() {
 	fi
 
 	join -o 1.1,1.3,1.4,2.2 -a 1 - $pf-old |
-		awk "$changed"' { print $1 " " $2 }' | tee $pf-tmp1 |
+		mawk "$changed"' { print $1 " " $2 }' | tee $pf-tmp1 |
 		sed 's/^[^ ]*_\([^ ]*\) .*/\1_*/' > $pf-tmp2
 	sed 's/.* \(.*\)/\1 source/' $pf-tmp1 | pkgdir |
 		paste -d / - $pf-tmp2
@@ -1213,12 +1246,16 @@ make_pkg_files() {
 		fi | sort | $GET2 > $pf-fifo1&
 
 		CHILDREN=$!
+echo wa0
 		find .apt-move/dists/$i/.index -type l -printf '%f %h/%l\n' |
 			if [ -n "$conj" ] && [ -s $pf-non-US ]; then
 				sort -u - $pf-non-US
 			else
 				sort
 			fi | $PKG1 $pf-fifo1 $contents > $pf-fifo2&
+echo "PKG1 = $PKG1"
+		/bin/sync
+		sleep 2
 
 		if [ $dogz ]; then
 			CHILDREN="$CHILDREN $!"
@@ -1233,6 +1270,11 @@ make_pkg_files() {
 			${donone:+$sect/$type} \
 			${dogz:+$pf-fifogz} \
 			${dobz:+$pf-fifobz} > /dev/null
+echo wa1
+echo "CHILDREN = $CHILDREN"
+#for childx in $CHILDREN; do
+#	ps ax|grep $childx
+#done
 		waitall
 
 		[ $norel ] && continue
@@ -1266,6 +1308,8 @@ get_checksum() {
                        $($cont|md5sum) $size $j/$k/$l
                printf ' %40s%.s %16d %s\n' \
                        $($cont|sha1sum) $size $j/$k/$l >&3
+               printf ' %64s%.s %16d %s\n' \
+                       $($cont|sha256sum) $size $j/$k/$l >&4
        done
 }
 
@@ -1325,7 +1369,7 @@ make_release() {
 		fi
 
 		cd $prev
-	done > $pf-md5sum 3> $pf-sha1sum
+	done > $pf-md5sum 3> $pf-sha1sum 4> $pf-sha256sum
 
 	[ -n "$compo" ] || return 0
 
@@ -1347,6 +1391,8 @@ make_release() {
 	cat $pf-md5sum
 	echo SHA1:
 	cat $pf-sha1sum
+	echo SHA256:
+	cat $pf-sha256sum
 
 	exec >&-
 
@@ -1387,7 +1433,7 @@ make_contents() {
 	set Contents-*
 	[ $# -eq 1 ] && [ ! -e "$1" ] && return
 	for j; do
-		sort $j | awk '
+		sort $j | mawk '
 			prev != $1 {
 				if (prev != "") {
 					printf "%-59s %s\n", prev, pkg
@@ -1605,7 +1651,7 @@ makeselect() {
 	dpkg --get-selections | sort -sb -k 2,2 > $pf-tmp1
 	echo install | join -j2 2 -o 2.1 - $pf-tmp1 > $f
 	if [ -f .apt-move/$DIST.binary ]; then
-		awk -F '[ \t_]' '{ print $3 " " $2 }' .apt-move/$DIST.binary |
+		mawk -F '[ \t_]' '{ print $3 " " $2 }' .apt-move/$DIST.binary |
 			sort | join -o 1.2 - $f | sort -u
 	fi > $f-src
 }
