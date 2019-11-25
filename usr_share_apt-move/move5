@@ -1,0 +1,115 @@
+# $Id: move5,v 1.7 2002/10/07 09:39:07 herbert Exp $
+
+function read(file, err, a) {
+	err = getline < file
+	if (err < 0) {
+		print "getline failed on " file > "/dev/stderr"
+		exit 1
+	} else if (err == 0) {
+		eof = 1
+		return
+	}
+
+	split($1, a, /_/)
+	ddist = a[1]
+	dname = a[2]
+	dver = $3
+}
+
+function pskip(i) {
+	for (i in files) {
+		print i > skipf
+	}
+}
+
+BEGIN {
+	distf = ARGV[1]
+	skipf = ARGV[2]
+	srcf = ARGV[3]
+	ARGC = 1
+
+	printf "" > srcf
+	printf "" > skipf
+
+	read(distf)
+}
+
+{
+	name = $1
+	ver = $2
+	ifn = $3
+	sdir = $4
+	split("", files)
+	for (i = 5; i <= NF; i++) {
+		files[$i] = 1
+	}
+}
+
+sname != name {
+	sname = name
+	while (!eof && dname < name) {
+		read(distf)
+	}
+	if (eof || dname != name) {
+		pskip()
+		next
+	}
+
+	split("", sdist)
+	split("", sver)
+	i = 1
+	do {
+		sver[i] = dver
+		sdist[i] = ddist
+		i++
+		read(distf)
+	} while (!eof && name == dname)
+}
+
+{
+	low = ""
+	for (i in sver) {
+		if (sver[i] == ver) {
+			low = ver
+			dist = sdist[i]
+			break
+		}
+		if (cmpversion(sver[i], ver) < 0) {
+			continue
+		}
+		if (low == "" || cmpversion(sver[i], low) < 0) {
+			low = sver[i]
+			dist = sdist[i]
+		}
+	}
+}
+
+low == "" {
+	pskip()
+	next
+}
+
+{
+	src = name
+
+	ever = ver
+	sub(/.*:/, "", ever)
+
+	key = substr(src, 1, 1)
+	if (key == "l" && substr(src, 1, 3) == "lib") {
+		key = substr(src, 1, 4)
+	}
+
+	dir = "pool/" dist "/" key "/" src
+	ifname = ".apt-move/" dir "/.index/" src "_" ver "_source"
+
+	printf "1\tD %s\n", dir
+	printf "1\tD .apt-move/%s/.index\n", dir
+	printf ifname > srcf
+	for (i in files) {
+		printf "2\tm %s/%s %s/%s\n", sdir, i, dir, i
+		printf " " sdir "/" i > srcf
+	}
+	printf "3\ti %s %s %s\n", ifn, ifname, dir
+	print "" > srcf
+}

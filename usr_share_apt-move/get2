@@ -1,0 +1,24 @@
+# $Id: get2,v 1.3 2002/10/12 01:21:05 herbert Exp $
+
+last != $1 {
+	if (last) {
+		print bestline
+	}
+	last = $1
+	bestline = $0
+	bestver = $NF
+	next
+}
+
+{
+	if (cmpversion($NF, bestver) > 0) {
+		bestline = $0
+		bestver = $NF
+	}
+}
+
+END {
+	if (last) {
+		print bestline
+	}
+}

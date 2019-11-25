@@ -1,0 +1,67 @@
+# $Id: get3,v 1.4 2002/10/11 12:01:32 herbert Exp $
+
+BEGIN {
+	type = ARGV[1]
+	ARGC = 1
+
+	map["package"] = ""
+	map["priority"] = ""
+	map["section"] = ""
+	map["version"] = ""
+	map["source"] = ""
+	map["task"] = "-"
+}
+
+{
+	dist = $1
+	file = $2
+
+	while ((val = getline < file) > 0) {
+		if (/^$/) {
+			section = map["section"]
+			if (dist == "-") {
+				key = getdist(section)
+			} else {
+				key = dist
+			}
+			package = map["package"]
+			if (type == "binary") {
+				source = map["source"]
+				map["source"] = ""
+				if (source == "") {
+					source = package
+				}
+				key = key "_" source "_" package
+				task = map["task"] " "
+				map["task"] = "-"
+			} else {
+				key = key "_" package
+			}
+			print \
+				key " " \
+				map["priority"] " " section " " \
+				task map["version"]
+			continue
+		}
+
+		if (/^[ \t]/) {
+			continue
+		}
+
+		x = index($0, ":")
+		if (!x) {
+			continue
+		}
+
+		field = tolower(substr($0, 1, x - 1))
+		if (field in map) {
+			split(substr($0, x + 1), a, " ")
+			map[field] = a[1]
+		}
+	}
+
+	if (val < 0) {
+		print "Failed to read " file > "/dev/stderr"
+		exit 1
+	}
+}

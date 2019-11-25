@@ -1,0 +1,96 @@
+#!/usr/bin/perl
+# $Id: move3,v 1.17 2002/11/09 05:19:01 herbert Exp $
+
+# stole this from dinstall
+sub cleansymlink {
+    my($old, $new) = @_;
+    my($olddir, $newdir, $oldfile, $newfile, @olddir, @newdir);
+    ($olddir, $oldfile) = ($old =~ m:((.*)/)?([^/]*):)[1,2];
+    ($newdir, $newfile) = ($new =~ m:((.*)/)?([^/]*):)[1,2];
+    
+    @olddir = split("/", $olddir);
+    @newdir = split("/", $newdir);
+
+    while (@olddir && $olddir[0] eq $newdir[0]) {
+	shift @olddir;
+	shift @newdir;
+    }
+    for (@newdir) { unshift(@olddir, ".."); }
+    symlink(join("/", @olddir, $oldfile), $new);
+}
+
+sub move {
+	my $new = "$_[1].new";
+	$_ = $_[0];
+	if (!-e) {
+		die "Could not move $_: no such file" unless
+			-e $_[1];
+		return;
+	}
+	if (-l) {
+		$_ = `readlink -f $_` or die "readlink failed";
+		chop;
+	}
+	unlink($new);
+	link($_, $new) or
+		!system("cp --preserve=timestamps $_ $new") or
+		die "Could not copy $_ to $new";
+	chmod(0644, $new);
+	chown(0, 0, $new) unless $>;
+	rename($new, $_[1]) or die "Could not rename $new to $_[1]: $!";
+	unlink($new);
+}
+
+while (<>) {
+	@_=split;
+
+	if ($_[0] eq "D") {
+		if (fileno(MKDIR) == undef) {
+			open(MKDIR, '| xargs -r mkdir -p');
+		}
+		print MKDIR "$_[1]\n";
+		next;
+	} else {
+		if (fileno(MKDIR) != undef) {
+			close(MKDIR) or
+				die "Could not make directories: $!";
+		}
+	}
+
+	if ($_[0] eq "d") {
+		system(substr($_, 2)) and exit 0;
+	} elsif ($_[0] eq "h") {
+		unlink($_[2]);
+		link($_[1], $_[2]) or
+			die "Could not link $_[1] to $_[2]: $!";
+	} elsif ($_[0] eq "H") {
+		link($_[1], $_[2]) or
+			die "Could not link $_[1] to $_[2]: $!";
+	} elsif ($_[0] eq "l") {
+		unlink($_[2]);
+		cleansymlink($_[1], $_[2]) or
+			die "Could not cleansymlink $_[1] to $_[2]: $!";
+	} elsif ($_[0] eq "r") {
+		unlink($_[2]);
+		rename($_[1], $_[2]) or
+			die "Could not rename $_[1] to $_[2]: $!";
+	} elsif ($_[0] eq "s") {
+		unlink($_[2]);
+		symlink($_[1], $_[2]) or
+			die "Could not symlink $_[1] to $_[2]: $!";
+	} elsif ($_[0] eq "i") {
+		open(IN, "<$_[1]") or die "Could not open $_[1]: $!";
+		open(OUT, ">$_[2]") or die "Could not open $_[2]: $!";
+		while (<IN>) {
+			s/^Directory:.*/Directory: $_[3]/;
+			print OUT $_;
+		}
+		close(IN);
+		close(OUT) or die "Could not close $_[2]: $!";
+	} elsif ($_[0] eq "u") {
+		unlink($_[1]) or "Could not unlink $_[1]: $!";
+	} elsif ($_[0] eq "m") {
+		move($_[1], $_[2]);
+	}
+}
+

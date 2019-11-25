@@ -1,0 +1,49 @@
+#!/usr/bin/awk -f
+
+BEGIN {
+	err = "/dev/stderr"
+}
+
+{
+	idx = $0
+	filefield = 0
+	split("", files)
+
+	while ((val = getline < idx) > 0) {
+		if (filefield) {
+			if (substr($0, 1, 1) == " ") {
+				files[$3] = 1
+				continue
+			} else {
+				filefield = 0
+			}
+		}
+		x = index($0, ":")
+		if (!x) {
+			continue
+		}
+		key = tolower(substr($0, 1, x - 1))
+		if (key == "directory") {
+			dir = substr($0, x + 1)
+			sub(/  */, "", dir)
+		} else if (key == "filename") {
+			file = substr($0, x + 1)
+			sub(/  */, "", file)
+			print file "\t" idx
+			close(idx)
+			next
+		} else if (key == "files") {
+			filefield = 1
+		}
+	}
+
+	if (val < 0) {
+		print "Failed to read " idx > err
+		exit 1
+	}
+	close(idx)
+
+	for (i in files) {
+		print dir "/" i "\t" idx
+	}
+}

@@ -1,0 +1,160 @@
+# $Id: move6,v 1.10 2002/10/19 04:20:33 herbert Exp $
+
+function read(file, err) {
+	err = getline < file
+	if (err < 0) {
+		print "getline failed on " file > "/dev/stderr"
+		exit 1
+	} else if (err == 0) {
+		eof = 1
+		return
+	}
+
+	binname = $1
+	binrel = $2
+	binver = $3
+}
+
+function process(i, j, a, rel, arch) {
+	for (i in best) {
+		split(i, a, SUBSEP)
+		rel = a[1]
+		arch = a[2]
+
+		print ones[i] arch twos[i] arch threes[i] tails[i]
+
+		split(tails[i], a)
+		for (j in a) {
+			usecnt[a[j]] = 1
+		}
+
+		if (arch != "binary-all") {
+			continue
+		}
+
+		for (j in relarches) {
+			split(j, a, SUBSEP)
+			if (a[1] != rel || a[2] == "source") {
+				continue
+			}
+			print ones[i] a[2] twos[i] a[2] threes[i] tails[i]
+		}
+	}
+
+	for (i in usecnt) {
+		if (!usecnt[i]) {
+			print i > skipf
+		}
+	}
+}
+
+function check() {
+	if (((rel, arch) in best) && cmpversion(best[rel, arch], ver) > 0) {
+		return
+	}
+	best[rel, arch] = ver
+	ones[rel, arch] = zero
+	twos[rel, arch] = "/" rel one rel two
+	threes[rel, arch] = three
+	tails[rel, arch] = tail
+}
+
+BEGIN {
+	binf = ARGV[1]
+	archf = ARGV[2]
+	skipf = ARGV[3]
+	ARGC = 1
+
+	while ((val = getline < archf) > 0) {
+		relarches[$1, $2] = 1
+	}
+
+	if (val < 0) {
+		print "getline failed on " archf > "/dev/stderr"
+		exit 1
+	}
+
+	read(binf)
+	printf "" > skipf
+}
+
+{
+	name = $1
+}
+
+prevname != name {
+	process()
+
+	split("", rels)
+	split("", vers)
+	split("", best)
+	split("", arches)
+	split("", ones)
+	split("", twos)
+	split("", threes)
+	split("", tails)
+	split("", usecnt)
+}
+
+{
+	split($1, a, /_/)
+	dist = a[1]
+	src = a[2]
+	bin = a[3]
+	ver = $2
+	arch = $3
+	file = $4
+	if (arch == "source") {
+		bin = src
+	} else {
+		arch = "binary-" arch
+	}
+
+	tail = ""
+	for (i = 5; i <= NF; i++) {
+		tail = tail " " $i
+		usecnt[$i] += 0
+	}
+}
+
+prevname != name {
+	while (!eof && binname < name) {
+		read(binf)
+	}
+	count = 0
+	while (!eof && binname == name) {
+		count++
+		rels[count] = binrel
+		vers[count] = binver
+		read(binf)
+	}
+
+	prevname = name
+}
+
+!count {
+	next
+}
+
+{
+	zero = bin "/"
+	one = " .apt-move/dists/"
+	two = "/" dist "/"
+	three = "/.index/" bin " " ver " " file
+
+	for (i = 1; i <= count; i++) {
+		rel = rels[i]
+		bver = vers[i]
+		if (arch != "binary-all" && !((rel, arch) in relarches)) {
+			continue
+		}
+		if (cmpversion(ver, bver) > 0) {
+			continue
+		}
+		check()
+	}
+}
+
+END {
+	process()
+}
